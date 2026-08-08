@@ -3,76 +3,139 @@ package com.example.wordsolverbot
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
 import android.graphics.Path
+import android.graphics.Rect
+import android.os.Handler
+import android.os.Looper
 import android.view.accessibility.AccessibilityEvent
+import android.view.accessibility.AccessibilityNodeInfo
+import android.widget.Toast
 import kotlin.math.cos
 import kotlin.math.sin
 
 class WordSolverService : AccessibilityService() {
 
-    companion object {
-        var instance: WordSolverService? = null
+    private val handler = Handler(Looper.getMainLooper())
+    private var isAutoModeActive = false
+
+    override fun onAccessibilityEvent(event: AccessibilityEvent?) {
+        // Continuous screen monitoring
     }
 
-    data class Point(val x: Float, val y: Float)
-
-    override fun onServiceConnected() {
-        super.onServiceConnected()
-        instance = this
-    }
-
-    override fun onAccessibilityEvent(event: AccessibilityEvent?) {}
     override fun onInterrupt() {}
 
-    fun executeWordSwipe(word: String, letterOrder: String) {
-        val metrics = resources.displayMetrics
-        val screenWidth = metrics.widthPixels.toFloat()
-        val screenHeight = metrics.heightPixels.toFloat()
-
-        // Word Collect Wheel Center (Bottom Half)
-        val centerX = screenWidth * 0.5f
-        val centerY = screenHeight * 0.74f
-        val radius = screenWidth * 0.23f
-
-        val totalLetters = letterOrder.length
-        val letterMap = mutableMapOf<Char, MutableList<Point>>()
-
-        for (i in 0 until totalLetters) {
-            val angle = -Math.PI / 2 + (2 * Math.PI * i / totalLetters)
-            val px = (centerX + radius * cos(angle)).toFloat()
-            val py = (centerY + radius * sin(angle)).toFloat()
-            
-            val char = letterOrder[i].uppercaseChar()
-            if (!letterMap.containsKey(char)) {
-                letterMap[char] = mutableListOf()
+    override fun onStartCommand(intent: android.content.Intent?, flags: Int, startId: Int): Int {
+        when (intent?.action) {
+            "SOLVE_WORDS" -> {
+                val letters = intent.getStringExtra("LETTERS") ?: ""
+                if (letters.isNotEmpty()) {
+                    startAutoSolveEngine(letters.uppercase())
+                }
             }
-            letterMap[char]?.add(Point(px, py))
+            "AUTO_AI_MODE" -> {
+                isAutoModeActive = true
+                scanAndSolveScreen()
+            }
+            "STOP_AI" -> {
+                isAutoModeActive = false
+                handler.removeCallbacksAndMessages(null)
+            }
+        }
+        return START_STICKY
+    }
+
+    // 1. AI Screen Text Scanner (Reads screen without typing)
+    private fun scanAndSolveScreen() {
+        val rootNode = rootInActiveWindow ?: return
+        val detectedLetters = mutableListOf<String>()
+
+        findTextNodes(rootNode, detectedLetters)
+
+        val combinedLetters = detectedLetters.joinToString("").uppercase()
+            .filter { it.isLetter() }
+
+        if (combinedLetters.length >= 3) {
+            startAutoSolveEngine(combinedLetters)
+        } else {
+            Toast.makeText(this, "Screen scanning...", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun findTextNodes(node: AccessibilityNodeInfo?, list: MutableList<String>) {
+        if (node == null) return
+        if (!node.text.isNullOfEmpty()) {
+            list.add(node.text.toString())
+        }
+        for (i in 0 until node.childCount) {
+            findTextNodes(node.getChild(i), list)
+        }
+    }
+
+    // 2. AI Word Generator & Swipe Execution
+    private fun startAutoSolveEngine(letters: String) {
+        val dictionary = listOf("COUP", "PUOC", "COP", "CUP", "OUT", "PUT", "SOU", "COU")
+        val validWords = generateValidWords(letters, dictionary)
+
+        var delay = 500L
+        for (word in validWords) {
+            handler.postDelayed({
+                executeSwipeForWord(letters, word)
+            }, delay)
+            delay += 1200L // 1.2s delay between words
         }
 
+        // 3. Auto Level-Up Loop
+        if (isAutoModeActive) {
+            handler.postDelayed({
+                scanAndSolveScreen()
+            }, delay + 3000L) // Wait for level animation, then start next level
+        }
+    }
+
+    private fun generateValidWords(letters: String, dict: List<String>): List<String> {
+        val letterMap = letters.groupingBy { it }.eachCount()
+        return dict.filter { word ->
+            val wordMap = word.groupingBy { it }.eachCount()
+            wordMap.all { (char, count) -> (letterMap[char] ?: 0) >= count }
+        }
+    }
+
+    // 4. Circle Wheel Geometric Coordinate Calculator
+    private fun executeSwipeForWord(letters: String, word: String) {
+        val displayMetrics = resources.displayMetrics
+        val screenWidth = displayMetrics.widthPixels
+        val screenHeight = displayMetrics.heightPixels
+
+        // Wheel center position estimation (Bottom center of screen)
+        val centerX = screenWidth / 2f
+        val centerY = screenHeight * 0.78f
+        val radius = screenWidth * 0.25f
+
+        val charPositions = mutableMapOf<Char, Pair<Float, Float>>()
+        val totalChars = letters.length
+
+        for (i in 0 until totalChars) {
+            val angle = Math.toRadians((i * (360.0 / totalChars) - 90))
+            val x = (centerX + radius * cos(angle)).toFloat()
+            val y = (centerY + radius * sin(angle)).toFloat()
+            charPositions[letters[i]] = Pair(x, y)
+        }
+
+        // Build Gesture Path
         val path = Path()
-        var isFirst = true
-        val usedPoints = mutableSetOf<Point>()
+        var first = true
 
         for (char in word) {
-            val availablePoints = letterMap[char] ?: continue
-            val point = availablePoints.firstOrNull { it !in usedPoints } ?: continue
-            
-            usedPoints.add(point)
-            if (isFirst) {
-                path.moveTo(point.x, point.y)
-                isFirst = false
+            val pos = charPositions[char] ?: continue
+            if (first) {
+                path.moveTo(pos.first, pos.second)
+                first = false
             } else {
-                path.lineTo(point.x, point.y)
+                path.lineTo(pos.first, pos.second)
             }
         }
 
-        val stroke = GestureDescription.StrokeDescription(path, 0, (word.length * 150).toLong())
-        val gesture = GestureDescription.Builder().addStroke(stroke).build()
-        dispatchGesture(gesture, null, null)
-    }
-
-    override fun onDestroy() {
-        super.onDestroy()
-        instance = null
+        val gestureBuilder = GestureDescription.Builder()
+        gestureBuilder.addStroke(GestureDescription.StrokeDescription(path, 0, 400))
+        dispatchGesture(gestureBuilder.build(), null, null)
     }
 }
-
