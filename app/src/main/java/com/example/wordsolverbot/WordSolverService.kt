@@ -3,7 +3,6 @@ package com.example.wordsolverbot
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
 import android.graphics.Path
-import android.graphics.Rect
 import android.os.Handler
 import android.os.Looper
 import android.view.accessibility.AccessibilityEvent
@@ -43,7 +42,7 @@ class WordSolverService : AccessibilityService() {
         return START_STICKY
     }
 
-    // 1. AI Screen Text Scanner (Reads screen without typing)
+    // 1. AI Screen Text Scanner (Reads screen)
     private fun scanAndSolveScreen() {
         val rootNode = rootInActiveWindow ?: return
         val detectedLetters = mutableListOf<String>()
@@ -56,13 +55,14 @@ class WordSolverService : AccessibilityService() {
         if (combinedLetters.length >= 3) {
             startAutoSolveEngine(combinedLetters)
         } else {
-            Toast.makeText(this, "Screen scanning...", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "Scanning screen...", Toast.LENGTH_SHORT).show()
         }
     }
 
     private fun findTextNodes(node: AccessibilityNodeInfo?, list: MutableList<String>) {
         if (node == null) return
-        if (!node.text.isNullOfEmpty()) {
+        // Typo Fixed: isNullOrEmpty() instead of isNullOfEmpty()
+        if (!node.text.isNullOrEmpty()) {
             list.add(node.text.toString())
         }
         for (i in 0 until node.childCount) {
@@ -80,14 +80,14 @@ class WordSolverService : AccessibilityService() {
             handler.postDelayed({
                 executeSwipeForWord(letters, word)
             }, delay)
-            delay += 1200L // 1.2s delay between words
+            delay += 1200L
         }
 
         // 3. Auto Level-Up Loop
         if (isAutoModeActive) {
             handler.postDelayed({
                 scanAndSolveScreen()
-            }, delay + 3000L) // Wait for level animation, then start next level
+            }, delay + 3000L)
         }
     }
 
@@ -99,13 +99,12 @@ class WordSolverService : AccessibilityService() {
         }
     }
 
-    // 4. Circle Wheel Geometric Coordinate Calculator
+    // 4. Geometric Circle Coordinate Calculator & Swipe
     private fun executeSwipeForWord(letters: String, word: String) {
         val displayMetrics = resources.displayMetrics
         val screenWidth = displayMetrics.widthPixels
         val screenHeight = displayMetrics.heightPixels
 
-        // Wheel center position estimation (Bottom center of screen)
         val centerX = screenWidth / 2f
         val centerY = screenHeight * 0.78f
         val radius = screenWidth * 0.25f
@@ -120,7 +119,6 @@ class WordSolverService : AccessibilityService() {
             charPositions[letters[i]] = Pair(x, y)
         }
 
-        // Build Gesture Path
         val path = Path()
         var first = true
 
