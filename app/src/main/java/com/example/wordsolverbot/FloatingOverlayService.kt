@@ -72,7 +72,7 @@ class FloatingOverlayService : Service() {
             y = 100
         }
 
-        // Tap karne par keyboard enable hoga
+        // Tap karne par keyboard active karne ka fix
         inputEditText.setOnTouchListener { _, event ->
             if (event.action == MotionEvent.ACTION_DOWN) {
                 params.flags = params.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE.inv()
@@ -95,7 +95,15 @@ class FloatingOverlayService : Service() {
             }
         }
 
+        // Direct view remove fix
         btnClose.setOnClickListener {
+            try {
+                if (::overlayView.isInitialized && overlayView.windowToken != null) {
+                    windowManager.removeView(overlayView)
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
             stopSelf()
         }
 
@@ -104,9 +112,12 @@ class FloatingOverlayService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
-        if (::overlayView.isInitialized) {
-            windowManager.removeView(overlayView)
+        try {
+            if (::overlayView.isInitialized && overlayView.windowToken != null) {
+                windowManager.removeView(overlayView)
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
         }
     }
 }
-
