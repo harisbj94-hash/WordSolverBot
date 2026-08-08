@@ -18,6 +18,10 @@ class FloatingOverlayService : Service() {
 
     private lateinit var windowManager: WindowManager
     private lateinit var overlayView: View
+    private var initialX = 0
+    private var initialY = 0
+    private var initialTouchX = 0f
+    private var initialTouchY = 0f
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -29,7 +33,7 @@ class FloatingOverlayService : Service() {
         val layout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(20, 20, 20, 20)
-            setBackgroundColor(0xCC000000.toInt())
+            setBackgroundColor(0xDD000000.toInt())
         }
 
         val inputEditText = EditText(this).apply {
@@ -45,6 +49,12 @@ class FloatingOverlayService : Service() {
             setTextColor(0xFFFFFFFF.toInt())
         }
 
+        val btnAiMode = Button(this).apply {
+            text = "🤖 START AI AUTO"
+            setBackgroundColor(0xFF2196F3.toInt())
+            setTextColor(0xFFFFFFFF.toInt())
+        }
+
         val btnClose = Button(this).apply {
             text = "✕ Close"
             setBackgroundColor(0xFFF44336.toInt())
@@ -53,6 +63,7 @@ class FloatingOverlayService : Service() {
 
         layout.addView(inputEditText)
         layout.addView(btnSolve)
+        layout.addView(btnAiMode)
         layout.addView(btnClose)
 
         overlayView = layout
@@ -64,54 +75,83 @@ class FloatingOverlayService : Service() {
                 WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
             else
                 WindowManager.LayoutParams.TYPE_PHONE,
-            WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.TOP or Gravity.START
             x = 100
-            y = 100
+            y = 200
         }
 
-        // Tap karne par keyboard active karne ka fix
+        // 1. Drag & Move Box Anywhere
+        layout.setOnTouchListener { _, event ->
+            when (event.action) {
+                MotionEvent.ACTION_DOWN -> {
+                    initialX = params.x
+                    initialY = params.y
+                    initialTouchX = event.rawX
+                    initialTouchY = event.rawY
+                    true
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    params.x = initialX + (event.rawX - initialTouchX).toInt()
+                    params.y = initialY + (event.rawY - initialTouchY).toInt()
+                    windowManager.updateViewLayout(overlayView, params)
+                    true
+                }
+                else -> false
+            }
+        }
+
+        // 2. Focus for Typing Keyboard
         inputEditText.setOnTouchListener { _, event ->
             if (event.action == MotionEvent.ACTION_DOWN) {
                 params.flags = params.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE.inv()
                 windowManager.updateViewLayout(overlayView, params)
+                inputEditText.requestFocus()
             }
             false
         }
 
+        // 3. Manual Solve Button
         btnSolve.setOnClickListener {
             val letters = inputEditText.text.toString().trim()
             if (letters.isNotEmpty()) {
+                params.flags = params.flags or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                windowManager.updateViewLayout(overlayView, params)
+
                 val intent = Intent(this, WordSolverService::class.java).apply {
                     action = "SOLVE_WORDS"
                     putExtra("LETTERS", letters)
                 }
                 startService(intent)
-                Toast.makeText(this, "Solving for: $letters", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "Solving: $letters", Toast.LENGTH_SHORT).show()
             } else {
                 Toast.makeText(this, "Letters enter karein!", Toast.LENGTH_SHORT).show()
             }
         }
 
-        // Direct view remove fix
-        btnClose.setOnClickListener {
-            try {
-                if (::overlayView.isInitialized && overlayView.windowToken != null) {
-                    windowManager.removeView(overlayView)
-                }
-            } catch (e: Exception) {
-                e.printStackTrace()
+        // 4. AI Auto Mode Button
+        btnAiMode.setOnClickListener {
+            params.flags = params.flags or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+            windowManager.updateViewLayout(overlayView, params)
+
+            val intent = Intent(this, WordSolverService::class.java).apply {
+                action = "AUTO_AI_MODE"
             }
-            stopSelf()
+            startService(intent)
+            Toast.makeText(this, "AI Auto Mode Activated!", Toast.LENGTH_SHORT).show()
+        }
+
+        // 5. Close Button
+        btnClose.setOnClickListener {
+            removeOverlayAndStop()
         }
 
         windowManager.addView(overlayView, params)
     }
 
-    override fun onDestroy() {
-        super.onDestroy()
+    private fun removeOverlayAndStop() {
         try {
             if (::overlayView.isInitialized && overlayView.windowToken != null) {
                 windowManager.removeView(overlayView)
@@ -119,5 +159,12 @@ class FloatingOverlayService : Service() {
         } catch (e: Exception) {
             e.printStackTrace()
         }
+        stopSelf()
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        removeOverlayAndStop()
     }
 }
+
